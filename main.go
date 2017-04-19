@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"strconv"
+	"errors"
+	"encoding/json"
+	"net/http"
 
 	"github.com/optiopay/klar/clair"
 	"github.com/optiopay/klar/docker"
@@ -12,62 +13,92 @@ import (
 var priorities = []string{"Unknown", "Negligible", "Low", "Medium", "High", "Critical", "Defcon1"}
 var store = make(map[string][]clair.Vulnerability)
 
+type Query struct {
+	ClairAddress string
+  ImageName string
+	DockerUser string
+	DockerPassword string
+	ClairThreshold int
+}
+
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Printf("Image name must be provided")
-		os.Exit(1)
-	}
+	http.HandleFunc("/", handler)
+	http.ListenAndServe(":8080", nil)
+}
 
-	clairAddr := os.Getenv("CLAIR_ADDR")
-	if clairAddr == "" {
-		fmt.Printf("Clair address must be provided")
-		os.Exit(1)
-	}
-
-	threshold := 0
-	thresholdStr := os.Getenv("CLAIR_THRESHOLD")
-	if thresholdStr != "" {
-		threshold, _ = strconv.Atoi(thresholdStr)
-	}
-
-	dockerUser := os.Getenv("DOCKER_USER")
-	dockerPassword := os.Getenv("DOCKER_PASSWORD")
-
-	image, err := docker.NewImage(os.Args[1], dockerUser, dockerPassword)
+func handler(w http.ResponseWriter, r *http.Request) {
+	query, err := decodeQuery(w, r)
 	if err != nil {
-		fmt.Printf("Can't parse qname: %s", err)
-		os.Exit(1)
+		http.Error(w, err.Error(), 400)
+		return
 	}
+
+	err = run(w, query)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+}
+
+func decodeQuery(w http.ResponseWriter, r* http.Request) (Query, error) {
+  var query Query;
+
+	if err := json.NewDecoder(r.Body).Decode(&query); err != nil {
+		return query, err
+	}
+
+	if len(query.ImageName) == 0 {
+		err := errors.New("ImageName has to be provided")
+		return query, err
+	}
+
+	return query, nil
+}
+
+func run(w http.ResponseWriter, query Query) error {
+	clairAddr := query.ClairAddress;
+	if clairAddr == "" {
+		return errors.New("Clair address must be provided")
+	}
+
+	dockerUser := query.DockerUser
+	dockerPassword := query.DockerPassword
+
+	image, err := docker.NewImage(query.ImageName, dockerUser, dockerPassword)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Can't parse qname: %s", err))
+	}
+
+	imageName := image.Name
+	imageTag := image.Tag
 
 	err = image.Pull()
 	if err != nil {
-		fmt.Printf("Can't pull image: %s", err)
-		os.Exit(1)
+		return errors.New(fmt.Sprintf("Can't pull image: %s", err))
 	}
 	if len(image.FsLayers) == 0 {
-		fmt.Printf("Can't pull fsLayers")
-		os.Exit(1)
+		return errors.New(fmt.Sprintf("Can't pull fsLayers"))
 	} else {
 		fmt.Printf("Analysing %d layers\n", len(image.FsLayers))
 	}
 
+	// The following two lines is a workaround for a problem in Google Container 
+	// Registry https://issuetracker.google.com/issues/37265047
+	image.Name = imageName
+	image.Tag = imageTag
+
 	c := clair.NewClair(clairAddr)
 	vs := c.Analyse(image)
-	groupBySeverity(vs)
-	fmt.Printf("Found %d vulnerabilities \n", len(vs))
-	highSevNumber := len(store["High"]) + len(store["Critical"]) + len(store["Defcon1"])
 
-	iteratePriorities(func(sev string) {
-		for _, v := range store[sev] {
-			fmt.Printf("%s: [%s] \n%s\n%s\n", v.Name, v.Severity, v.Description, v.Link)
-			fmt.Println("-----------------------------------------")
-		}
-	})
-	iteratePriorities(func(sev string) { fmt.Printf("%s: %d\n", sev, len(store[sev])) })
-
-	if highSevNumber > threshold {
-		os.Exit(1)
+	json, err := json.Marshal(vs)
+	if err != nil {
+		return err
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(json)
+
+	return nil
 }
 
 func iteratePriorities(f func(sev string)) {

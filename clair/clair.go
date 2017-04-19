@@ -113,7 +113,7 @@ func (c *Clair) Analyse(image *docker.Image) []Vulnerability {
 		return nil
 	}
 
-	var vs []Vulnerability
+	vs := make([]Vulnerability, 0)
 	for i := layerLength - 1; i >= 0; i-- {
 		layer := newLayer(image, i)
 		err := c.pushLayer(layer)
@@ -147,7 +147,7 @@ func (c *Clair) analyzeLayer(layer docker.FsLayer) ([]Vulnerability, error) {
 	if err = json.NewDecoder(response.Body).Decode(&envelope); err != nil {
 		return nil, err
 	}
-	var vs []Vulnerability
+	vs := make([]Vulnerability, 0)
 	for _, f := range envelope.Layer.Features {
 		for _, v := range f.Vulnerabilities {
 			vs = append(vs, v)
@@ -164,6 +164,7 @@ func (c *Clair) pushLayer(layer *layer) error {
 	}
 	url := fmt.Sprintf("%s/v1/layers", c.url)
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	request.Header.Del("Accept-Encoding")
 	if err != nil {
 		return fmt.Errorf("Can't create a push request: %s", err)
 	}
