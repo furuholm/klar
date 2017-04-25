@@ -35,6 +35,11 @@ type FsLayer struct {
 	BlobSum string
 }
 
+// Layers represent a collection of layers
+type layers struct {
+	FsLayers []FsLayer
+}
+
 const dockerHub = "registry-1.docker.io"
 
 var client = &http.Client{}
@@ -135,10 +140,14 @@ func (i *Image) Pull() error {
 		}
 	}
 	defer resp.Body.Close()
-	if err = json.NewDecoder(resp.Body).Decode(i); err != nil {
+
+	layers := &layers{}
+	if err = json.NewDecoder(resp.Body).Decode(layers); err != nil {
 		fmt.Println("Decode error")
 		return err
 	}
+	i.FsLayers = layers.FsLayers
+
 	return nil
 }
 
