@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/optiopay/klar/clair"
-	"github.com/optiopay/klar/docker"
+	"github.com/furuholm/klar/docker"
 )
 
 type jsonOutput struct {

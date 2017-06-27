@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/optiopay/klar/docker"
+	"github.com/furuholm/klar/docker"
 )
 
 const (
